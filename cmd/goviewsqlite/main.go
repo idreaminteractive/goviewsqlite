@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/idreaminteractive/goviewsqlite/internal/commands"
 	"github.com/urfave/cli/v2"
 )
 
@@ -30,16 +31,25 @@ func main() {
 			fmt.Printf("Starting up - %s, %s\n", url, port)
 			return nil
 		},
-		// Commands: []*cli.Command{
-		// 	{
-		// 		Name:  "server",
-		// 		Usage: "Runs hot reload server on a specific port",
-		// 		Action: func(cCtx *cli.Context) error {
+		Commands: []*cli.Command{
+			{
+				Name:  "seed",
+				Usage: "Locally sets up a db for usage for testing @ the db location",
+				Action: func(cCtx *cli.Context) error {
+					// cmd := exec.Command("cat", "./data/seed.sql", "|", "sqlite3", "/data/sqlite.db")
+					// cmd := exec.Command("sqlite3", "-cmd", ".import ./data/seed.sql")
+					// stdoutStderr, err := cmd.CombinedOutput()
+					// if err != nil {
+					// 	fmt.Fprintf(cCtx.App.ErrWriter, "exec failed  %s: \n%s\n", err, string(stdoutStderr))
+					// } else {
+					// 	fmt.Fprintf(cCtx.App.Writer, "Result: %s", string(stdoutStderr))
+					// }
 
-		// 			return commands.Serve(cCtx, url)
-		// 		},
-		// 	},
-		// },
+					// return nil
+					return commands.RunSeed(cCtx.App.Writer, url, "./data/seed.sql")
+				},
+			},
+		},
 	}
 
 	app.Run(os.Args)

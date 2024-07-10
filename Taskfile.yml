@@ -9,6 +9,11 @@ tasks:
   dev:
     deps: [air, hotreload]
 
+  seed:
+    cmds:
+      - rm -f /data/*.db
+      - go run ./cmd/goviewsqlite/main.go seed
+
   # hot reload sidecar
   hotreload:
     cmds:

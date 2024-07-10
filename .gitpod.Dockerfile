@@ -25,5 +25,10 @@ RUN pip install -U litecli
 RUN go install github.com/a-h/templ/cmd/templ@v0.2.747
 RUN go install github.com/idreaminteractive/goreload/cmd/goreload@v0.0.3
 
+
+
+RUN sudo mkdir /data
+RUN sudo chown -R gitpod /data
+
 # alias all the things
 RUN echo 'alias home="cd ${GITPOD_REPO_ROOT}"' | tee -a ~/.bashrc ~/.zshrc
