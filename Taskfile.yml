@@ -1,0 +1,54 @@
+interval: "500ms"
+version: "3"
+
+tasks:
+  air:
+    cmds:
+      - air
+
+  dev:
+    deps: [air, hotreload]
+
+  # hot reload sidecar
+  hotreload:
+    cmds:
+      - goreload --url {{.HOT_RELOAD_URL}} server
+    vars:
+      HOT_RELOAD_URL:
+        sh: gp url 8082
+
+  build:
+    cmds:
+      - task: buildmain
+
+  start:
+    cmds:
+      - ./tmp/main
+
+  buildmain:
+    cmds:
+      - templ generate && go build  -o ./tmp/main ./cmd/goviewsqlite/main.go
+
+  generate:
+    cmds:
+      - templ generate && go generate ./...
+
+  test-watch:
+    watch: true
+    sources:
+      - "**/*.go"
+    cmds:
+      - go test -v ./...
+
+  test:
+    cmds:
+      - go test -v ./...
+
+  # reset local
+  kill-dev:
+    cmds:
+      - fuser -k -n file -SIGINT /home/gitpod/go-packages/bin/air 2>/dev/null || true
+
+  sqldump:
+    cmds:
+      - sqlite3 ./data/sqlite.db .schema > dump.sql && code dump.sql
