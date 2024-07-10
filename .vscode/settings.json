@@ -1,0 +1,14 @@
+{
+    "files.exclude": {
+        "**/*_templ.go": true
+    },
+    "editor.rulers": [
+        120
+    ],
+    "editor.stickyScroll.enabled": true,
+    "editor.formatOnSave": true,
+    "auto-close-tag.activationOnLanguage": [
+        "templ"
+    ],
+    "alpine-intellisense.settings.languageScopes": "html,templ"
+}
