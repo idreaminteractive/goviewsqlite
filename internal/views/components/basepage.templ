@@ -1,0 +1,78 @@
+package components
+
+import (
+	"fmt"
+	"github.com/idreaminteractive/goviewsqlite/internal/common"
+)
+
+type BasePageData struct {
+	Title   string
+	Content templ.Component
+}
+
+// CSRF needs to be auto injected here
+templ BasePageComponent(props BasePageData) {
+	<!DOCTYPE html>
+	<html data-theme="dark">
+		<head>
+			if props.Title == "" {
+				<title>Ignite Home</title>
+			} else {
+				<title>{ props.Title }</title>
+			}
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<link
+				rel="stylesheet"
+				href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"
+			/>
+			<link rel="icon" href="/static/favicon.ico"/>
+			<script src="https://unpkg.com/htmx.org@2.0.0"></script>
+			<script src="https://unpkg.com/htmx.org/dist/ext/alpine-morph.js"></script>
+			<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+			<script type="text/javascript">
+				// uncomment to see all the htmx logging
+				htmx.logAll();		
+			</script>
+			// other libraries
+			<style>
+			[x-cloak] { display: none !important; }
+			</style>
+		</head>
+		<body hx-headers={ fmt.Sprintf("{\"X-CSRF-Token\": \"%s\"}", common.GetCtxCSRF(ctx)) }>
+			<script type="text/javascript">
+				// capture unknown responses
+				document.body.addEventListener('htmx:responseError', function (evt) {
+					// handle non-200s for htmx
+					// todo -  find a clean way to handle these items (rather than render internal server error in templ)
+					switch(evt.detail.xhr.status) {
+						case 401:
+							window.alert("Unauthorized")
+							break
+						case 403:
+							window.alert("Forbidden")
+							break
+						case 404:
+							window.alert("Not Found")
+							break
+						case 500:	
+							window.alert("Internal server error")
+							// log out error in console.error here.
+							break
+						default:
+							break
+					}
+				});
+
+			</script>
+			// @ToastListing(common.GetCtxToasts(ctx))
+			<main>
+				@props.Content
+			</main>
+			// // only hot reload in dev
+			// if common.GetCtxEnv(ctx) == "dev_local" {
+			// 	@goreload.ReloadComponent(common.GetCtxHotReloadURL(ctx))
+			// }
+		</body>
+	</html>
+}

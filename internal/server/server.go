@@ -3,28 +3,13 @@ package server
 
 import (
 	"context"
-	"database/sql"
-	"encoding/gob"
+	"errors"
 	"fmt"
-	"idreaminteractive/ignite/internal/config"
-	errs "idreaminteractive/ignite/internal/errors"
-	"idreaminteractive/ignite/internal/features/authz"
-	"idreaminteractive/ignite/internal/features/common"
-	"idreaminteractive/ignite/internal/features/game"
-	"idreaminteractive/ignite/internal/features/jobs"
-	"idreaminteractive/ignite/internal/features/unity"
-
-	"idreaminteractive/ignite/internal/features/organization"
-	"idreaminteractive/ignite/internal/features/turso"
-	"idreaminteractive/ignite/internal/features/user"
-	ignite "idreaminteractive/ignite/internal/types"
-	"idreaminteractive/ignite/internal/web"
 
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -34,115 +19,43 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v2"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
-	"github.com/idreaminteractive/goreload"
+	"github.com/idreaminteractive/goviewsqlite/internal/sqlite"
 )
 
-type IgniteDB interface {
-	Connection() *sql.DB
-	Open() error
-	Close() error
-	Ready() bool
-}
-
-type MuxConfigStruct struct {
-	SessionSecret string
-	DisableCSRF   bool
-	Logger        *httplog.Logger
-	Env           string
-}
-
 type Server struct {
-	DB                IgniteDB
-	Mux               *chi.Mux
-	config            *config.EnvConfig
-	logger            *httplog.Logger
-	HttpServer        *http.Server
-	RunningServices   []RunningService
-	CloseableServices []CloseableService
+	DB         *sqlite.LocalDB
+	Mux        *chi.Mux
+	logger     *httplog.Logger
+	HttpServer *http.Server
 }
 
-// Services that are created and passed in by the calling system to NewServer
-type Services struct {
-	// Non-concrete or variable services should meet an interface defined in here and the consuming services
-	TenantService ignite.TenantService
-
-	// for concrete services, require a pointer directly to them
-	OrgService   *organization.OrganizationService
-	AuthzService *authz.AuthzService
-	IdpService   ignite.IDPService
-	// this may be moved to non-concrete
-	SessionService ignite.SessionService
-
-	UserService *user.UserService
-	// may move to non-concrete
-	TursoService *turso.TursoService
-	GameService  *game.GameService
-	UnityService *unity.UnityService
-
-	JobService *jobs.JobService
-}
-
-// used to check if services are nil - they cannot be.
-func anyFieldIsNil(s interface{}) bool {
-	v := reflect.ValueOf(s)
-
-	// Handle pointer to struct
-	if v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return true
-		}
-		v = v.Elem()
-	}
-
-	for i := 0; i < v.NumField(); i++ {
-		field := v.Field(i)
-		if field.Kind() == reflect.Ptr && field.IsNil() {
-			return true
-		}
-	}
-	return false
-}
-
-// this gets run when this module is loaded. it's hacky,
-// but gob needs these types setup before anything else
-// so, it works.
-func init() {
-	gob.Register(ignite.SessionPayload{})
-	gob.Register(ignite.FlashMessage{})
-}
-
-func NewServer(config *config.EnvConfig, logger *httplog.Logger, database IgniteDB, disableCSRF bool) *Server {
+func NewServer(logger *httplog.Logger, database *sqlite.LocalDB) *Server {
 	if !database.Ready() {
 		log.Fatalf("Database is not ready")
 	}
 
-	r := SetupMux(MuxConfigStruct{
-		SessionSecret: config.SessionSecret,
-		Logger:        logger,
-		Env:           config.DopplerConfig,
-		DisableCSRF:   disableCSRF,
-	})
+	r := SetupMux(logger)
 
 	return &Server{
 		DB:     database,
 		Mux:    r,
-		config: config,
 		logger: logger,
 		// init http after
 	}
 }
 
-func (m *Server) Initialize(svs *Services) error {
-	if anyFieldIsNil(svs) {
-		m.logger.Error("Field in service struct was nil")
-		return errs.Errorf(errs.INTERNAL, "Field in service struct was nil")
-	}
-	web.AddRootMiddlewares(m.Mux, m.config, m.logger, svs.SessionService, svs.OrgService, svs.AuthzService, svs.GameService, svs.TenantService)
+type MuxSetupStruct struct {
+	Mux *chi.Mux
+}
+
+func (m *Server) Initialize(mux *chi.Mux, logger *httplog.Logger, portStr string) error {
+
+	// web.AddRootMiddlewares(m.Mux,  m.logger, )
 
 	// attach + create all handlers
-	addRoutes(m.Mux, m.config, m.logger, svs)
+	addRoutes(m.Mux, m.logger, m.DB.Connection())
 
-	port, err := strconv.Atoi(m.config.Port)
+	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		m.logger.Error("Could not parse port")
 		return err
@@ -153,20 +66,9 @@ func (m *Server) Initialize(svs *Services) error {
 		Handler: m.Mux,
 	}
 
-	// are there services that need to be shutdown?
-	m.RunningServices = append(m.RunningServices, svs.JobService)
-
 	m.HttpServer = httpServer
 	return nil
 
-}
-
-type RunningService interface {
-	Run(ctx context.Context) error
-}
-
-type CloseableService interface {
-	Close() error
 }
 
 // only run during a normal run site... not in tests!
@@ -174,13 +76,7 @@ func (s *Server) Run(ctx context.Context) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 	if s.HttpServer == nil {
-		return errs.Errorf(errs.INTERNAL, "HttpServer is nil, cannot run")
-	}
-	s.logger.Info("ignite started!")
-	url, err := common.SiteUrl(s.config)
-
-	if err == nil {
-		fmt.Printf("URL: %s\n", url)
+		return errors.New("HttpServer is nil")
 	}
 
 	go func() {
@@ -190,26 +86,24 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}()
 
-	if s.config.IsLocalDev() {
-		hrUrl, err := common.HotReloadUrl(s.config)
-		if err != nil {
-			log.Fatalf("Could not get site url for hot reload")
-		}
-		err = goreload.SendReloadSignal(hrUrl)
+	// if s.config.IsLocalDev() {
+	// 	hrUrl, err := common.HotReloadUrl(s.config)
+	// 	if err != nil {
+	// 		log.Fatalf("Could not get site url for hot reload")
+	// 	}
+	// 	err = goreload.SendReloadSignal(hrUrl)
 
-		if err != nil {
-			log.Fatalf("Failed to trigger hot reload: %v", err)
-		}
+	// 	if err != nil {
+	// 		log.Fatalf("Failed to trigger hot reload: %v", err)
+	// 	}
 
-	}
+	// }
+	s.logger.Info("GoSQLite Viewer started!")
+	// url, err := common.SiteUrl(s.config)
 
-	// run our services
-	for _, runnable := range s.RunningServices {
-		// we run the service w/ the ctx, so if we shutdown, it'll capture it
-		if err := runnable.Run(ctx); err != nil {
-			log.Fatalf("Failed to start runnable service: %v", err)
-		}
-	}
+	// if err == nil {
+	// 	fmt.Printf("URL: %s\n", url)
+	// }
 
 	var wg sync.WaitGroup
 
@@ -219,13 +113,6 @@ func (s *Server) Run(ctx context.Context) error {
 		defer wg.Done()
 		// wait for our done signal (ctrl+c or otherwise)
 		<-ctx.Done()
-
-		// close all closables
-		for _, closable := range s.CloseableServices {
-			if err := closable.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error closing service: %v\n", err)
-			}
-		}
 
 		// graceful shutdown
 		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -247,14 +134,12 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 // take in our interfaces + setup all the details here.
-func SetupMux(
-	config MuxConfigStruct,
-) *chi.Mux {
+func SetupMux(logger *httplog.Logger) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	// add our logger to chi + to server struct
-	if config.Logger != nil { // for tests
-		r.Use(httplog.RequestLogger(config.Logger))
+	if logger != nil { // for tests
+		r.Use(httplog.RequestLogger(logger))
 	}
 
 	// setup our enforcer here

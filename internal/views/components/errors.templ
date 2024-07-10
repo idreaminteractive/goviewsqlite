@@ -1,0 +1,20 @@
+package components
+
+templ NotFoundPage() {
+	@BasePageComponent(BasePageData{
+		Title:   "Not Found",
+		Content: NotFoundComponent(),
+	})
+}
+
+templ NotFoundComponent() {
+	<div>404 - Not found</div>
+}
+
+templ InternalServerErrorComponent(err error) {
+	<div>
+		<h2>Oh No!</h2>
+		<div>{ err.Error() }</div>
+		<div><a href="/">Go Home</a></div>
+	</div>
+}
